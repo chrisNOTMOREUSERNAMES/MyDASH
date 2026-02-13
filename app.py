@@ -28,7 +28,7 @@ def get_analysis(symbol, interval):
         
         sma20 = df['Close'].rolling(window=20).mean()
         std20 = df['Close'].rolling(window=20).std()
-        df['BB_Top'] = sma20 + (std20 * 2) # Added Upper BB
+        df['BB_Top'] = sma20 + (std20 * 2)
         df['BB_Bot'] = sma20 - (std20 * 2)
 
         # 2. Slow Stochastic (5, 1) & Historical Cross Logic
@@ -39,25 +39,17 @@ def get_analysis(symbol, interval):
         stoch_val = df['%K'].iloc[-1]
         prev_stoch = df['%K'].iloc[-2]
         
-        # Direction Logic
         direction = "UP 📈" if stoch_val > prev_stoch else "DOWN 📉"
         dir_color = "green" if stoch_val > prev_stoch else "red"
 
-        # Find Last Cross Backward Scan
         last_cross_type = "None"
         last_cross_date = "N/A"
-        
         for i in range(len(df)-2, 1, -1):
-            prev_val = df['%K'].iloc[i]
-            curr_val = df['%K'].iloc[i+1]
+            prev_val = df['%K'].iloc[i]; curr_val = df['%K'].iloc[i+1]
             if prev_val > 80 and curr_val <= 80:
-                last_cross_type = "Below 80"
-                last_cross_date = df.index[i+1].strftime('%Y-%m-%d')
-                break
+                last_cross_type = "Below 80"; last_cross_date = df.index[i+1].strftime('%Y-%m-%d'); break
             if prev_val < 20 and curr_val >= 20:
-                last_cross_type = "Above 20"
-                last_cross_date = df.index[i+1].strftime('%Y-%m-%d')
-                break
+                last_cross_type = "Above 20"; last_cross_date = df.index[i+1].strftime('%Y-%m-%d'); break
 
         last = df.iloc[-1]
         curr_price = last['Close']
@@ -67,15 +59,10 @@ def get_analysis(symbol, interval):
         price_ema_diff = curr_price - ema4
         price_ema_pct = (price_ema_diff / ema4) * 100
         dist_bb_sma = last['BB_Bot'] - last['SMA50']
-        
         bb_slope = (df['BB_Bot'].iloc[-1] - df['BB_Bot'].iloc[-4]) / 3
         sma_slope = (df['SMA50'].iloc[-1] - df['SMA50'].iloc[-4]) / 3
         closure_rate = sma_slope - bb_slope if dist_bb_sma < 0 else bb_slope - sma_slope
-        
-        if closure_rate > 0:
-            est_periods = f"{int(abs(dist_bb_sma) / closure_rate)} {interval.replace('1', '')}s"
-        else:
-            est_periods = "N/A"
+        est_periods = f"{int(abs(dist_bb_sma) / closure_rate)} {interval.replace('1', '')}s" if closure_rate > 0 else "N/A"
 
         # 4. Comparison Logic
         def compare(target_val, name):
@@ -85,24 +72,23 @@ def get_analysis(symbol, interval):
             diff = curr_price - target_val
             pct = (diff / target_val) * 100
             
-            # Special case for 4 EMA: It can't be above itself for the status
-            if name == "4 EMA":
-                status = "-"
-                color = "white"
-            else:
-                status = "YES" if ema4 > target_val else "NO"
-                color = "green" if ema4 > target_val else "red"
+            # Distance color: Green if Price > Target, Red if Price < Target
+            dist_color = "green" if diff >= 0 else "red"
+            
+            # Status: YES/NO for 4EMA vs Target (Dash for 4EMA row itself)
+            status = "-" if name == "4 EMA" else ("YES" if ema4 > target_val else "NO")
+            status_color = "white" if name == "4 EMA" else ("green" if ema4 > target_val else "red")
                 
             return {
                 "name": name, 
                 "val": target_val, 
                 "status": status, 
+                "status_color": status_color,
                 "dist_val": diff, 
                 "dist_pct": pct, 
-                "color": color
+                "dist_color": dist_color
             }
 
-        # Added 4 EMA and Upper BB to this list
         comparisons = [
             compare(last['EMA4'], "4 EMA"),
             compare(last['EMA20'], "20 EMA"),
@@ -115,7 +101,6 @@ def get_analysis(symbol, interval):
             compare(last['BB_Bot'], "Lower BB")
         ]
 
-        # Streak Logic
         is_green = (df['Close'] > df['Open']).tolist()
         streak = 0
         for i in reversed(is_green):
@@ -150,7 +135,6 @@ if tickers:
                         if data:
                             c1, c2 = st.columns(2)
                             s_color = "green" if data['streak'] > 0 else "red"
-                            
                             c1.markdown(f"**Streak:** :{s_color}[{data['streak']:+d}]")
                             c1.markdown(f"**Price:** `${data['price']:.2f}` (4EMA: `${data['ema4']:.2f}`)")
                             c1.markdown(f"**vs. 4EMA:** :{data['pe_color']}[{data['pe_diff']:+.2f} ({data['pe_pct']:+.2f}%)]")
@@ -166,7 +150,7 @@ if tickers:
                             for comp in data['comparisons']:
                                 col_name, col_status, col_dist = st.columns([2.2, 1.3, 2.5])
                                 col_name.write(f"{comp['name']} (`${comp['val']:.2f}`)")
-                                col_status.markdown(f":{comp['color']}[**{comp['status']}**]")
-                                col_dist.markdown(f":{comp['color']}[{comp['dist_val']:+.2f} ({comp['dist_pct']:+.2f}%)]")
+                                col_status.markdown(f":{comp['status_color']}[**{comp['status']}**]")
+                                col_dist.markdown(f":{comp['dist_color']}[{comp['dist_val']:+.2f} ({comp['dist_pct']:+.2f}%)]")
                         else:
                             st.error("Insufficient data.")
