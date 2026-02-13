@@ -12,7 +12,7 @@ st.title("📊 4-EMA Benchmark Analysis")
 def get_analysis(symbol, interval):
     try:
         df = yf.download(symbol, period="max", interval=interval, progress=False)
-        if df.empty or len(df) < 50: return None
+        if df.empty or len(df) < 5: return None
         
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
@@ -31,7 +31,7 @@ def get_analysis(symbol, interval):
         df['BB_Top'] = sma20 + (std20 * 2)
         df['BB_Bot'] = sma20 - (std20 * 2)
 
-        # 2. Slow Stochastic (5, 1) & Historical Cross Logic
+        # 2. Slow Stochastic (5, 1)
         low_5 = df['Low'].rolling(window=5).min()
         high_5 = df['High'].rolling(window=5).max()
         df['%K'] = (df['Close'] - low_5) / (high_5 - low_5) * 100
@@ -55,38 +55,33 @@ def get_analysis(symbol, interval):
         curr_price = last['Close']
         ema4 = last['EMA4']
 
-        # 3. Price vs 4 EMA & Convergence
+        # 3. Calculations for UI
         price_ema_diff = curr_price - ema4
         price_ema_pct = (price_ema_diff / ema4) * 100
-        dist_bb_sma = last['BB_Bot'] - last['SMA50']
-        bb_slope = (df['BB_Bot'].iloc[-1] - df['BB_Bot'].iloc[-4]) / 3
-        sma_slope = (df['SMA50'].iloc[-1] - df['SMA50'].iloc[-4]) / 3
-        closure_rate = sma_slope - bb_slope if dist_bb_sma < 0 else bb_slope - sma_slope
-        est_periods = f"{int(abs(dist_bb_sma) / closure_rate)} {interval.replace('1', '')}s" if closure_rate > 0 else "N/A"
+        dist_bb_sma = last['BB_Bot'] - last['SMA50'] if not pd.isna(last['SMA50']) else 0
 
         # 4. Comparison Logic
         def compare(target_val, name):
             if pd.isna(target_val): 
-                return {"name": name, "val": 0, "status": "N/A", "dist_val": 0, "dist_pct": 0, "color": "white"}
+                return {"name": name, "val": 0, "status": "N/A", "s_color": "gray", "d_val": 0, "d_pct": 0, "d_color": "gray"}
             
             diff = curr_price - target_val
             pct = (diff / target_val) * 100
             
-            # Distance color: Green if Price > Target, Red if Price < Target
-            dist_color = "green" if diff >= 0 else "red"
+            # Status Logic (4 EMA vs Others)
+            if name == "4 EMA":
+                status = "-"
+                status_color = "gray"
+            else:
+                status = "YES" if ema4 > target_val else "NO"
+                status_color = "green" if ema4 > target_val else "red"
             
-            # Status: YES/NO for 4EMA vs Target (Dash for 4EMA row itself)
-            status = "-" if name == "4 EMA" else ("YES" if ema4 > target_val else "NO")
-            status_color = "white" if name == "4 EMA" else ("green" if ema4 > target_val else "red")
+            # Distance Logic (Price vs Indicators)
+            dist_color = "green" if diff >= 0 else "red"
                 
             return {
-                "name": name, 
-                "val": target_val, 
-                "status": status, 
-                "status_color": status_color,
-                "dist_val": diff, 
-                "dist_pct": pct, 
-                "dist_color": dist_color
+                "name": name, "val": target_val, "status": status, 
+                "s_color": status_color, "d_val": diff, "d_pct": pct, "d_color": dist_color
             }
 
         comparisons = [
@@ -110,7 +105,6 @@ def get_analysis(symbol, interval):
         return {
             "price": curr_price, "ema4": ema4, "pe_diff": price_ema_diff, "pe_pct": price_ema_pct, "pe_color": "green" if price_ema_diff >= 0 else "red",
             "streak": streak if is_green[-1] else -streak, "comparisons": comparisons,
-            "cond_bb": "YES" if dist_bb_sma > 0 else "NO", "cond_bb_color": "green" if dist_bb_sma > 0 else "red", "bb_dist": dist_bb_sma, "est_cross": est_periods,
             "stoch_val": stoch_val, "stoch_dir": direction, "stoch_dir_color": dir_color,
             "last_cross_type": last_cross_type, "last_cross_date": last_cross_date
         }
@@ -150,7 +144,7 @@ if tickers:
                             for comp in data['comparisons']:
                                 col_name, col_status, col_dist = st.columns([2.2, 1.3, 2.5])
                                 col_name.write(f"{comp['name']} (`${comp['val']:.2f}`)")
-                                col_status.markdown(f":{comp['status_color']}[**{comp['status']}**]")
-                                col_dist.markdown(f":{comp['dist_color']}[{comp['dist_val']:+.2f} ({comp['dist_pct']:+.2f}%)]")
+                                col_status.markdown(f":{comp['s_color']}[**{comp['status']}**]")
+                                col_dist.markdown(f":{comp['d_color']}[{comp['d_val']:+.2f} ({comp['d_pct']:+.2f}%)]")
                         else:
-                            st.error("Insufficient data.")
+                            st.error(f"Data unavailable for {ticker}.")
