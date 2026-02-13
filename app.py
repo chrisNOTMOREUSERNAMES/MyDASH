@@ -56,12 +56,13 @@ def get_analysis(symbol, interval):
         # 4. Comparison Logic Function
         def compare(target_val, name):
             if pd.isna(target_val): 
-                return {"name": name, "status": "N/A", "dist_val": 0, "dist_pct": 0, "color": "white"}
+                return {"name": name, "val": 0, "status": "N/A", "dist_val": 0, "dist_pct": 0, "color": "white"}
             diff_from_price = curr_price - target_val
             pct_from_price = (diff_from_price / target_val) * 100
             ema_above = ema4 > target_val
             return {
                 "name": name, 
+                "val": target_val,
                 "status": "YES" if ema_above else "NO", 
                 "dist_val": diff_from_price, 
                 "dist_pct": pct_from_price, 
@@ -122,7 +123,6 @@ if tickers:
                             # Left Column: Price Metrics
                             c1.markdown(f"**Streak:** :{s_color}[{data['streak']:+d}]")
                             c1.markdown(f"**Price:** `${data['price']:.2f}` (4EMA: `${data['ema4']:.2f}`)")
-                            # NEW LINE: Price vs 4EMA Comparison
                             c1.markdown(f"**vs. 4EMA:** :{data['pe_color']}[{data['pe_diff']:+.2f} ({data['pe_pct']:+.2f}%)]")
                             
                             # Right Column: BB Metrics
@@ -131,12 +131,14 @@ if tickers:
                             c2.markdown(f"**Est. Cross in:** ` {data['est_cross']} `")
                             
                             st.divider()
-                            h1, h2, h3 = st.columns([1.5, 2, 2.5])
-                            h1.write("**Indicator**"); h2.write("**4 EMA Above?**"); h3.write("**$ and % Above**")
+                            # Updated column widths to accommodate the indicator value
+                            h1, h2, h3 = st.columns([2.2, 1.3, 2.5])
+                            h1.write("**Indicator (Value)**"); h2.write("**4 EMA Above?**"); h3.write("**$ and % Above Price**")
                             
                             for comp in data['comparisons']:
-                                col_name, col_status, col_dist = st.columns([1.5, 2, 2.5])
-                                col_name.write(comp['name'])
+                                col_name, col_status, col_dist = st.columns([2.2, 1.3, 2.5])
+                                # NEW: Showing the current value of the indicator next to the name
+                                col_name.write(f"{comp['name']} (`${comp['val']:.2f}`)")
                                 col_status.markdown(f":{comp['color']}[**{comp['status']}**]")
                                 col_dist.markdown(f":{comp['color']}[{comp['dist_val']:+.2f} ({comp['dist_pct']:+.2f}%)]")
                         else:
