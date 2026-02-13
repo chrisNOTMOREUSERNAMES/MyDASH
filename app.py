@@ -30,39 +30,52 @@ def get_analysis(symbol, interval):
         df['BB_Bot'] = sma20 - (std20 * 2)
 
         last = df.iloc[-1]
-        prev = df.iloc[-2]
+        curr_price = last['Close']
+        ema4 = last['EMA4']
 
         # 2. Convergence Logic (BB Bot vs SMA 50)
-        dist = last['BB_Bot'] - last['SMA50']
-        
-        # Calculate Rate of Change (Slope) over last 3 periods for stability
+        dist_bb_sma = last['BB_Bot'] - last['SMA50']
         bb_slope = (df['BB_Bot'].iloc[-1] - df['BB_Bot'].iloc[-4]) / 3
         sma_slope = (df['SMA50'].iloc[-1] - df['SMA50'].iloc[-4]) / 3
         
-        # Relative speed (How much is the gap closing per period?)
-        # A positive closure means they are moving toward each other
-        closure_rate = sma_slope - bb_slope if dist < 0 else bb_slope - sma_slope
+        closure_rate = sma_slope - bb_slope if dist_bb_sma < 0 else bb_slope - sma_slope
         
         est_periods = "N/A"
-        if closure_rate > 0 and abs(dist) > 0:
-            est_periods = f"{int(abs(dist) / closure_rate)} {interval.replace('1', '')}s"
-        elif dist > 0:
+        if closure_rate > 0 and abs(dist_bb_sma) > 0:
+            est_periods = f"{int(abs(dist_bb_sma) / closure_rate)} {interval.replace('1', '')}s"
+        elif dist_bb_sma > 0:
             est_periods = "Above SMA50"
         else:
             est_periods = "Moving Away"
 
-        # 3. 4-EMA Comparison Function
+        # 3. Comparison Logic Function
+        # Status = EMA4 vs Target | Distance = Current Price vs Target
         def compare(target_val, name):
-            if pd.isna(target_val): return {"name": name, "status": "N/A", "dist_val": 0, "dist_pct": 0, "color": "white"}
-            diff = last['EMA4'] - target_val
-            pct = (diff / target_val) * 100
-            is_above = diff > 0
-            return {"name": name, "status": "YES" if is_above else "NO", "dist_val": diff, "dist_pct": pct, "color": "green" if is_above else "red"}
+            if pd.isna(target_val): 
+                return {"name": name, "status": "N/A", "dist_val": 0, "dist_pct": 0, "color": "white"}
+            
+            # THE FIX: Calculate distance from current price
+            diff_from_price = curr_price - target_val
+            pct_from_price = (diff_from_price / target_val) * 100
+            
+            # Trend status remains based on 4 EMA
+            ema_above = ema4 > target_val
+            
+            return {
+                "name": name, 
+                "status": "YES" if ema_above else "NO", 
+                "dist_val": diff_from_price, 
+                "dist_pct": pct_from_price, 
+                "color": "green" if ema_above else "red"
+            }
 
         comparisons = [
-            compare(last['SMA100'], "100 SMA"), compare(last['SMA200'], "200 SMA"),
-            compare(last['EMA250'], "250 EMA"), compare(last['EMA600'], "600 EMA"),
-            compare(last['SMA50'], "50 SMA"), compare(last['BB_Bot'], "Lower BB")
+            compare(last['SMA100'], "100 SMA"), 
+            compare(last['SMA200'], "200 SMA"),
+            compare(last['EMA250'], "250 EMA"), 
+            compare(last['EMA600'], "600 EMA"),
+            compare(last['SMA50'], "50 SMA"), 
+            compare(last['BB_Bot'], "Lower BB")
         ]
 
         # Streak
@@ -73,24 +86,23 @@ def get_analysis(symbol, interval):
             else: break
 
         return {
-            "ema4": last['EMA4'],
+            "price": curr_price,
+            "ema4": ema4,
             "streak": streak if is_green[-1] else -streak,
             "comparisons": comparisons,
-            "cond_bb": "YES" if dist > 0 else "NO",
-            "cond_bb_color": "green" if dist > 0 else "red",
-            "bb_dist": dist,
-            "bb_slope": bb_slope,
+            "cond_bb": "YES" if dist_bb_sma > 0 else "NO",
+            "cond_bb_color": "green" if dist_bb_sma > 0 else "red",
+            "bb_dist": dist_bb_sma,
             "est_cross": est_periods
         }
     except: return None
 
-# --- UI SETTINGS ---
+# --- UI ---
 with st.sidebar:
     st.header("Settings")
     raw_tickers = st.text_area("Tickers", "AAPL, MSFT, TSLA, BTC-USD, NVDA, SPY")
     tickers = [t.strip().upper() for t in raw_tickers.split(",") if t.strip()]
 
-# --- DISPLAY ---
 if tickers:
     grid = st.columns(2)
     for idx, ticker in enumerate(tickers):
@@ -105,7 +117,7 @@ if tickers:
                             c1, c2 = st.columns(2)
                             s_color = "green" if data['streak'] > 0 else "red"
                             c1.markdown(f"**Streak:** :{s_color}[{data['streak']:+d}]")
-                            c1.markdown(f"**Current 4 EMA:** `${data['ema4']:.2f}`")
+                            c1.markdown(f"**Price:** `${data['price']:.2f}` (4EMA: `${data['ema4']:.2f}`)")
                             
                             c2.markdown(f"**BB Bot > SMA 50?** :{data['cond_bb_color']}[{data['cond_bb']}]")
                             c2.markdown(f"**Gap to SMA 50:** `{data['bb_dist']:.2f}`")
