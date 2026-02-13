@@ -30,13 +30,15 @@ def get_analysis(symbol, interval):
         std20 = df['Close'].rolling(window=20).std()
         df['BB_Bot'] = sma20 - (std20 * 2)
 
-        # 2. Slow Stochastic (5, 1) & Historical Cross Logic
+        # Stochastic (5, 1) - No Smoothing
+        # window=5 includes the current candle + 4 previous
         low_5 = df['Low'].rolling(window=5).min()
         high_5 = df['High'].rolling(window=5).max()
+        
+        # Calculate %K using the current Close
         df['%K'] = (df['Close'] - low_5) / (high_5 - low_5) * 100
         
         stoch_val = df['%K'].iloc[-1]
-        prev_stoch = df['%K'].iloc[-2]
         
         # Direction Logic
         direction = "UP 📈" if stoch_val > prev_stoch else "DOWN 📉"
