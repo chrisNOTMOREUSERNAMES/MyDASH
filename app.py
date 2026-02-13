@@ -19,6 +19,7 @@ def get_analysis(symbol, interval):
 
         # 1. Base Indicators
         df['EMA4'] = df['Close'].ewm(span=4, adjust=False).mean()
+        df['EMA20'] = df['Close'].ewm(span=20, adjust=False).mean() # NEW: 20 EMA
         df['SMA50'] = df['Close'].rolling(window=50).mean()
         df['SMA100'] = df['Close'].rolling(window=100).mean()
         df['SMA200'] = df['Close'].rolling(window=200).mean()
@@ -70,11 +71,12 @@ def get_analysis(symbol, interval):
             }
 
         comparisons = [
+            compare(last['EMA20'], "20 EMA"), # Added to list
+            compare(last['SMA50'], "50 SMA"), 
             compare(last['SMA100'], "100 SMA"), 
             compare(last['SMA200'], "200 SMA"),
             compare(last['EMA250'], "250 EMA"), 
             compare(last['EMA600'], "600 EMA"),
-            compare(last['SMA50'], "50 SMA"), 
             compare(last['BB_Bot'], "Lower BB")
         ]
 
@@ -120,24 +122,20 @@ if tickers:
                             c1, c2 = st.columns(2)
                             s_color = "green" if data['streak'] > 0 else "red"
                             
-                            # Left Column: Price Metrics
                             c1.markdown(f"**Streak:** :{s_color}[{data['streak']:+d}]")
                             c1.markdown(f"**Price:** `${data['price']:.2f}` (4EMA: `${data['ema4']:.2f}`)")
                             c1.markdown(f"**vs. 4EMA:** :{data['pe_color']}[{data['pe_diff']:+.2f} ({data['pe_pct']:+.2f}%)]")
                             
-                            # Right Column: BB Metrics
                             c2.markdown(f"**BB Bot > SMA 50?** :{data['cond_bb_color']}[{data['cond_bb']}]")
                             c2.markdown(f"**Gap to SMA 50:** `{data['bb_dist']:.2f}`")
                             c2.markdown(f"**Est. Cross in:** ` {data['est_cross']} `")
                             
                             st.divider()
-                            # Updated column widths to accommodate the indicator value
                             h1, h2, h3 = st.columns([2.2, 1.3, 2.5])
                             h1.write("**Indicator (Value)**"); h2.write("**4 EMA Above?**"); h3.write("**$ and % Above Price**")
                             
                             for comp in data['comparisons']:
                                 col_name, col_status, col_dist = st.columns([2.2, 1.3, 2.5])
-                                # NEW: Showing the current value of the indicator next to the name
                                 col_name.write(f"{comp['name']} (`${comp['val']:.2f}`)")
                                 col_status.markdown(f":{comp['color']}[**{comp['status']}**]")
                                 col_dist.markdown(f":{comp['color']}[{comp['dist_val']:+.2f} ({comp['dist_pct']:+.2f}%)]")
