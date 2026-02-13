@@ -12,7 +12,7 @@ st.title("📊 4-EMA Benchmark Analysis")
 def get_analysis(symbol, interval):
     try:
         df = yf.download(symbol, period="max", interval=interval, progress=False)
-        if df.empty or len(df) < 5: return None
+        if df.empty or len(df) < 25: return None
         
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
@@ -31,68 +31,53 @@ def get_analysis(symbol, interval):
         df['BB_Top'] = sma20 + (std20 * 2)
         df['BB_Bot'] = sma20 - (std20 * 2)
 
-        # 2. Slow Stochastic (5, 1)
+        # 2. Volatility (BB Width) Logic
+        df['BB_Width'] = ((df['BB_Top'] - df['BB_Bot']) / sma20) * 100
+        curr_width = df['BB_Width'].iloc[-1]
+        prev_width = df['BB_Width'].iloc[-2]
+        avg_width = df['BB_Width'].rolling(window=20).mean().iloc[-1]
+        
+        vol_status = "EXPANDING 📈" if curr_width > prev_width else "TIGHTENING 📉"
+        vol_color = "orange" if curr_width > prev_width else "cyan"
+        is_squeeze = " (SQUEEZE)" if curr_width < avg_width * 0.8 else ""
+
+        # 3. Slow Stochastic (5, 1)
         low_5 = df['Low'].rolling(window=5).min()
         high_5 = df['High'].rolling(window=5).max()
         df['%K'] = (df['Close'] - low_5) / (high_5 - low_5) * 100
-        
         stoch_val = df['%K'].iloc[-1]
         prev_stoch = df['%K'].iloc[-2]
-        
-        direction = "UP 📈" if stoch_val > prev_stoch else "DOWN 📉"
-        dir_color = "green" if stoch_val > prev_stoch else "red"
+        stoch_dir = "UP 📈" if stoch_val > prev_stoch else "DOWN 📉"
+        stoch_dir_col = "green" if stoch_val > prev_stoch else "red"
 
-        last_cross_type = "None"
-        last_cross_date = "N/A"
+        # Last Cross Scan
+        last_cross_type = "None"; last_cross_date = "N/A"
         for i in range(len(df)-2, 1, -1):
-            prev_val = df['%K'].iloc[i]; curr_val = df['%K'].iloc[i+1]
-            if prev_val > 80 and curr_val <= 80:
+            p_v = df['%K'].iloc[i]; c_v = df['%K'].iloc[i+1]
+            if p_v > 80 and c_v <= 80:
                 last_cross_type = "Below 80"; last_cross_date = df.index[i+1].strftime('%Y-%m-%d'); break
-            if prev_val < 20 and curr_val >= 20:
+            if p_v < 20 and c_v >= 20:
                 last_cross_type = "Above 20"; last_cross_date = df.index[i+1].strftime('%Y-%m-%d'); break
 
         last = df.iloc[-1]
         curr_price = last['Close']
         ema4 = last['EMA4']
 
-        # 3. Calculations for UI
-        price_ema_diff = curr_price - ema4
-        price_ema_pct = (price_ema_diff / ema4) * 100
-        dist_bb_sma = last['BB_Bot'] - last['SMA50'] if not pd.isna(last['SMA50']) else 0
-
         # 4. Comparison Logic
         def compare(target_val, name):
             if pd.isna(target_val): 
                 return {"name": name, "val": 0, "status": "N/A", "s_color": "gray", "d_val": 0, "d_pct": 0, "d_color": "gray"}
-            
             diff = curr_price - target_val
             pct = (diff / target_val) * 100
-            
-            # Status Logic (4 EMA vs Others)
-            if name == "4 EMA":
-                status = "-"
-                status_color = "gray"
-            else:
-                status = "YES" if ema4 > target_val else "NO"
-                status_color = "green" if ema4 > target_val else "red"
-            
-            # Distance Logic (Price vs Indicators)
-            dist_color = "green" if diff >= 0 else "red"
-                
-            return {
-                "name": name, "val": target_val, "status": status, 
-                "s_color": status_color, "d_val": diff, "d_pct": pct, "d_color": dist_color
-            }
+            s_val = "-" if name == "4 EMA" else ("YES" if ema4 > target_val else "NO")
+            s_col = "gray" if name == "4 EMA" else ("green" if ema4 > target_val else "red")
+            return {"name": name, "val": target_val, "status": s_val, "s_color": s_col, "d_val": diff, "d_pct": pct, "d_color": "green" if diff >= 0 else "red"}
 
         comparisons = [
-            compare(last['EMA4'], "4 EMA"),
-            compare(last['EMA20'], "20 EMA"),
-            compare(last['SMA50'], "50 SMA"), 
-            compare(last['SMA100'], "100 SMA"), 
-            compare(last['SMA200'], "200 SMA"), 
-            compare(last['EMA250'], "250 EMA"), 
-            compare(last['EMA600'], "600 EMA"),
-            compare(last['BB_Top'], "Upper BB"),
+            compare(last['EMA4'], "4 EMA"), compare(last['EMA20'], "20 EMA"),
+            compare(last['SMA50'], "50 SMA"), compare(last['SMA100'], "100 SMA"),
+            compare(last['SMA200'], "200 SMA"), compare(last['EMA250'], "250 EMA"),
+            compare(last['EMA600'], "600 EMA"), compare(last['BB_Top'], "Upper BB"),
             compare(last['BB_Bot'], "Lower BB")
         ]
 
@@ -103,10 +88,11 @@ def get_analysis(symbol, interval):
             else: break
 
         return {
-            "price": curr_price, "ema4": ema4, "pe_diff": price_ema_diff, "pe_pct": price_ema_pct, "pe_color": "green" if price_ema_diff >= 0 else "red",
-            "streak": streak if is_green[-1] else -streak, "comparisons": comparisons,
-            "stoch_val": stoch_val, "stoch_dir": direction, "stoch_dir_color": dir_color,
-            "last_cross_type": last_cross_type, "last_cross_date": last_cross_date
+            "price": curr_price, "ema4": ema4, "pe_diff": curr_price - ema4, "pe_pct": ((curr_price-ema4)/ema4)*100, 
+            "pe_color": "green" if curr_price >= ema4 else "red", "streak": streak if is_green[-1] else -streak, 
+            "comparisons": comparisons, "stoch_val": stoch_val, "stoch_dir": stoch_dir, "stoch_dir_col": stoch_dir_col,
+            "last_cross_type": last_cross_type, "last_cross_date": last_cross_date,
+            "bw_pct": curr_width, "vol_status": vol_status + is_squeeze, "vol_color": vol_color
         }
     except: return None
 
@@ -129,14 +115,14 @@ if tickers:
                         if data:
                             c1, c2 = st.columns(2)
                             s_color = "green" if data['streak'] > 0 else "red"
-                            c1.markdown(f"**Streak:** :{s_color}[{data['streak']:+d}]")
-                            c1.markdown(f"**Price:** `${data['price']:.2f}` (4EMA: `${data['ema4']:.2f}`)")
+                            c1.markdown(f"**Streak:** :{s_color}[{data['streak']:+d}] | **Price:** `${data['price']:.2f}`")
                             c1.markdown(f"**vs. 4EMA:** :{data['pe_color']}[{data['pe_diff']:+.2f} ({data['pe_pct']:+.2f}%)]")
+                            c1.markdown(f"**BB Width:** `{data['bw_pct']:.2f}%`")
                             
                             lc_color = "green" if "Above 20" in data['last_cross_type'] else "red"
-                            c2.markdown(f"**Stoch (5,1):** `{data['stoch_val']:.1f}` | :{data['stoch_dir_color']}[{data['stoch_dir']}]")
-                            c2.markdown(f"**Last Cross:** :{lc_color}[{data['last_cross_type']}]")
-                            c2.markdown(f"**Cross Date:** `{data['last_cross_date']}`")
+                            c2.markdown(f"**Stoch:** `{data['stoch_val']:.1f}` | :{data['stoch_dir_col']}[{data['stoch_dir']}]")
+                            c2.markdown(f"**Volatility:** :{data['vol_color']}[{data['vol_status']}]")
+                            c2.markdown(f"**Last Cross:** :{lc_color}[{data['last_cross_date']}]")
                             
                             st.divider()
                             h1, h2, h3 = st.columns([2.2, 1.3, 2.5])
@@ -146,5 +132,4 @@ if tickers:
                                 col_name.write(f"{comp['name']} (`${comp['val']:.2f}`)")
                                 col_status.markdown(f":{comp['s_color']}[**{comp['status']}**]")
                                 col_dist.markdown(f":{comp['d_color']}[{comp['d_val']:+.2f} ({comp['d_pct']:+.2f}%)]")
-                        else:
-                            st.error(f"Data unavailable for {ticker}.")
+                        else: st.error(f"Data unavailable for {ticker}.")
