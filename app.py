@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import yfinance as yf
+import numpy as np
 
 # Page Config
 st.set_page_config(page_title="Technical Comparison Dashboard", layout="wide")
@@ -10,9 +11,8 @@ st.title("📊 4-EMA Benchmark Analysis")
 @st.cache_data(ttl=600)
 def get_analysis(symbol, interval):
     try:
-        # Fetch max history for the 600 EMA
         df = yf.download(symbol, period="max", interval=interval, progress=False)
-        if df.empty or len(df) < 2: return None
+        if df.empty or len(df) < 50: return None
         
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
@@ -25,110 +25,100 @@ def get_analysis(symbol, interval):
         df['EMA250'] = df['Close'].ewm(span=250, adjust=False).mean()
         df['EMA600'] = df['Close'].ewm(span=600, adjust=False).mean()
         
-        # Bollinger Bands
         sma20 = df['Close'].rolling(window=20).mean()
         std20 = df['Close'].rolling(window=20).std()
-        df['BB_Top'] = sma20 + (std20 * 2)
         df['BB_Bot'] = sma20 - (std20 * 2)
 
         last = df.iloc[-1]
-        ema4 = last['EMA4']
+        prev = df.iloc[-2]
 
-        # 2. Comparison Logic Function
+        # 2. Convergence Logic (BB Bot vs SMA 50)
+        dist = last['BB_Bot'] - last['SMA50']
+        
+        # Calculate Rate of Change (Slope) over last 3 periods for stability
+        bb_slope = (df['BB_Bot'].iloc[-1] - df['BB_Bot'].iloc[-4]) / 3
+        sma_slope = (df['SMA50'].iloc[-1] - df['SMA50'].iloc[-4]) / 3
+        
+        # Relative speed (How much is the gap closing per period?)
+        # A positive closure means they are moving toward each other
+        closure_rate = sma_slope - bb_slope if dist < 0 else bb_slope - sma_slope
+        
+        est_periods = "N/A"
+        if closure_rate > 0 and abs(dist) > 0:
+            est_periods = f"{int(abs(dist) / closure_rate)} {interval.replace('1', '')}s"
+        elif dist > 0:
+            est_periods = "Above SMA50"
+        else:
+            est_periods = "Moving Away"
+
+        # 3. 4-EMA Comparison Function
         def compare(target_val, name):
-            if pd.isna(target_val):
-                return {"name": name, "status": "N/A", "dist_val": 0, "dist_pct": 0, "color": "white"}
-            
-            diff = ema4 - target_val
+            if pd.isna(target_val): return {"name": name, "status": "N/A", "dist_val": 0, "dist_pct": 0, "color": "white"}
+            diff = last['EMA4'] - target_val
             pct = (diff / target_val) * 100
             is_above = diff > 0
-            
-            return {
-                "name": name,
-                "status": "YES" if is_above else "NO",
-                "dist_val": diff,
-                "dist_pct": pct,
-                "color": "green" if is_above else "red",
-                "target_price": target_val
-            }
+            return {"name": name, "status": "YES" if is_above else "NO", "dist_val": diff, "dist_pct": pct, "color": "green" if is_above else "red"}
 
-        # 3. Build Comparison List
         comparisons = [
-            compare(last['SMA100'], "100 SMA"),
-            compare(last['SMA200'], "200 SMA"),
-            compare(last['EMA250'], "250 EMA"),
-            compare(last['EMA600'], "600 EMA"),
-            compare(last['SMA50'], "50 SMA"),
-            compare(last['BB_Top'], "Upper BB"),
-            compare(last['BB_Bot'], "Lower BB"),
+            compare(last['SMA100'], "100 SMA"), compare(last['SMA200'], "200 SMA"),
+            compare(last['EMA250'], "250 EMA"), compare(last['EMA600'], "600 EMA"),
+            compare(last['SMA50'], "50 SMA"), compare(last['BB_Bot'], "Lower BB")
         ]
 
-        # Streak Logic
+        # Streak
         is_green = (df['Close'] > df['Open']).tolist()
-        last_color = is_green[-1]
         streak = 0
         for i in reversed(is_green):
-            if i == last_color: streak += 1
+            if i == is_green[-1]: streak += 1
             else: break
-        
-        # Condition: BB Bottom > SMA 50
-        cond_bb_sma = last['BB_Bot'] > last['SMA50']
 
         return {
-            "price": last['Close'],
-            "ema4": ema4,
-            "streak": streak if last_color else -streak,
+            "ema4": last['EMA4'],
+            "streak": streak if is_green[-1] else -streak,
             "comparisons": comparisons,
-            "cond_bb": "YES" if cond_bb_sma else "NO",
-            "cond_bb_color": "green" if cond_bb_sma else "red"
+            "cond_bb": "YES" if dist > 0 else "NO",
+            "cond_bb_color": "green" if dist > 0 else "red",
+            "bb_dist": dist,
+            "bb_slope": bb_slope,
+            "est_cross": est_periods
         }
-    except:
-        return None
+    except: return None
 
 # --- UI SETTINGS ---
 with st.sidebar:
-    st.header("Dashboard Settings")
-    raw_tickers = st.text_area("Tickers (comma separated)", "AAPL, MSFT, TSLA, BTC-USD, NVDA, SPY")
+    st.header("Settings")
+    raw_tickers = st.text_area("Tickers", "AAPL, MSFT, TSLA, BTC-USD, NVDA, SPY")
     tickers = [t.strip().upper() for t in raw_tickers.split(",") if t.strip()]
 
-# --- DISPLAY LOOP ---
+# --- DISPLAY ---
 if tickers:
     grid = st.columns(2)
     for idx, ticker in enumerate(tickers):
         with grid[idx % 2]:
             with st.container(border=True):
-                st.header(f"{ticker}")
+                st.header(ticker)
                 t_d, t_w, t_m = st.tabs(["Daily", "Weekly", "Monthly"])
-                
                 for tab, interval in zip([t_d, t_w, t_m], ["1d", "1wk", "1mo"]):
                     with tab:
                         data = get_analysis(ticker, interval)
                         if data:
-                            # 1. Top Metrics
                             c1, c2 = st.columns(2)
                             s_color = "green" if data['streak'] > 0 else "red"
                             c1.markdown(f"**Streak:** :{s_color}[{data['streak']:+d}]")
                             c1.markdown(f"**Current 4 EMA:** `${data['ema4']:.2f}`")
+                            
                             c2.markdown(f"**BB Bot > SMA 50?** :{data['cond_bb_color']}[{data['cond_bb']}]")
+                            c2.markdown(f"**Gap to SMA 50:** `{data['bb_dist']:.2f}`")
+                            c2.markdown(f"**Est. Cross in:** ` {data['est_cross']} `")
                             
                             st.divider()
-                            
-                            # 2. Header Row for Comparisons
                             h1, h2, h3 = st.columns([1.5, 2, 2.5])
-                            h1.write("**Indicator**")
-                            h2.write("**4 EMA vs. Indicators**")
-                            h3.write("**$ and % Above MA's**")
+                            h1.write("**Indicator**"); h2.write("**4 EMA Above?**"); h3.write("**$ and % Above**")
                             
-                            # 3. Data Rows
                             for comp in data['comparisons']:
                                 col_name, col_status, col_dist = st.columns([1.5, 2, 2.5])
-                                
                                 col_name.write(comp['name'])
                                 col_status.markdown(f":{comp['color']}[**{comp['status']}**]")
-                                
-                                # Distance formatting
-                                dist_str = f"{comp['dist_val']:+.2f} ({comp['dist_pct']:+.2f}%)"
-                                col_dist.markdown(f":{comp['color']}[{dist_str}]")
-                                
+                                col_dist.markdown(f":{comp['color']}[{comp['dist_val']:+.2f} ({comp['dist_pct']:+.2f}%)]")
                         else:
-                            st.error("Insufficient data for this timeframe.")
+                            st.error("Insufficient data.")
