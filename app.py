@@ -31,39 +31,61 @@ def get_analysis(symbol, interval):
         df['BB_Top'] = sma20 + (std20 * 2)
         df['BB_Bot'] = sma20 - (std20 * 2)
 
-        # 2. BB Outside Logic (Current and Last Completed)
         curr_p = df['Close'].iloc[-1]
-        prev_p = df['Close'].iloc[-2]
         curr_top = df['BB_Top'].iloc[-1]
         curr_bot = df['BB_Bot'].iloc[-1]
-        prev_top = df['BB_Top'].iloc[-2]
-        prev_bot = df['BB_Bot'].iloc[-2]
 
-        bb_outside_msg = "Inside Bands"
-        bb_outside_col = "gray"
+        # 2. BB Proximity & Crossing Logic
+        def get_bb_proximity(price, top, bot):
+            # Within 1% or Crossed
+            top_dist = abs(price - top) / top
+            bot_dist = abs(price - bot) / bot
+            
+            upper_alert = "NORMAL"
+            upper_col = "gray"
+            if price >= top: 
+                upper_alert = "CROSSED ABOVE"
+                upper_col = "green"
+            elif top_dist <= 0.01:
+                upper_alert = "NEAR TOP (1%)"
+                upper_col = "orange"
 
-        # Check Current
-        is_above = curr_p > curr_top
-        is_below = curr_p < curr_bot
-        
-        # Check Previous
-        was_above = prev_p > prev_top
-        was_below = prev_p < prev_bot
+            lower_alert = "NORMAL"
+            lower_col = "gray"
+            if price <= bot:
+                lower_alert = "CROSSED BELOW"
+                lower_col = "red"
+            elif bot_dist <= 0.01:
+                lower_alert = "NEAR BOT (1%)"
+                lower_col = "orange"
+                
+            return upper_alert, upper_col, lower_alert, lower_col
 
-        if is_above:
-            bb_outside_msg = "ABOVE Upper BB"
-            bb_outside_col = "green"
-            if was_above: bb_outside_msg += " (2nd+ Bar)"
-        elif is_below:
-            bb_outside_msg = "BELOW Lower BB"
-            bb_outside_col = "red"
-            if was_below: bb_outside_msg += " (2nd+ Bar)"
+        u_alert, u_col, l_alert, l_col = get_bb_proximity(curr_p, curr_top, curr_bot)
 
-        # 3. Volatility & Stochastic
+        # 3. Consecutive Touches/Outside Logic
+        def count_consecutive(prices, tops, bottoms):
+            upper_streak = 0
+            lower_streak = 0
+            
+            # Check Upper
+            for i in range(len(prices)-1, -1, -1):
+                if prices.iloc[i] >= tops.iloc[i]: upper_streak += 1
+                else: break
+                
+            # Check Lower
+            for i in range(len(prices)-1, -1, -1):
+                if prices.iloc[i] <= bottoms.iloc[i]: lower_streak += 1
+                else: break
+            
+            return upper_streak, lower_streak
+
+        u_streak, l_streak = count_consecutive(df['Close'], df['BB_Top'], df['BB_Bot'])
+
+        # 4. Volatility & Stochastic
         df['BB_Width'] = ((df['BB_Top'] - df['BB_Bot']) / sma20) * 100
         curr_w = df['BB_Width'].iloc[-1]
-        prev_w = df['BB_Width'].iloc[-2]
-        vol_status = "EXPANDING 📈" if curr_w > prev_w else "TIGHTENING 📉"
+        vol_status = "EXPANDING 📈" if curr_w > df['BB_Width'].iloc[-2] else "TIGHTENING 📉"
         
         low_5 = df['Low'].rolling(window=5).min()
         high_5 = df['High'].rolling(window=5).max()
@@ -81,7 +103,6 @@ def get_analysis(symbol, interval):
                 last_cross_type = "Above 20"; last_cross_date = df.index[i+1].strftime('%Y-%m-%d'); break
 
         last = df.iloc[-1]
-        # 4. Comparison Logic
         def compare(target_val, name):
             if pd.isna(target_val): return {"name": name, "val": 0, "status": "N/A", "s_color": "gray", "d_val": 0, "d_pct": 0, "d_color": "gray"}
             diff = curr_p - target_val
@@ -103,8 +124,9 @@ def get_analysis(symbol, interval):
             "pe_color": "green" if curr_p >= last['EMA4'] else "red", "streak": streak if is_green[-1] else -streak, 
             "comparisons": comparisons, "stoch_val": stoch_v, "stoch_dir": stoch_dir, "stoch_dir_col": "green" if stoch_dir == "UP 📈" else "red",
             "last_cross_type": last_cross_type, "last_cross_date": last_cross_date,
-            "bw_pct": curr_w, "vol_status": vol_status, "vol_color": "orange" if curr_w > prev_w else "cyan",
-            "bb_outside_msg": bb_outside_msg, "bb_outside_col": bb_outside_col
+            "bw_pct": curr_w, "vol_status": vol_status, "vol_color": "orange" if curr_w > df['BB_Width'].iloc[-2] else "cyan",
+            "u_alert": u_alert, "u_col": u_col, "l_alert": l_alert, "l_col": l_col,
+            "u_streak": u_streak, "l_streak": l_streak
         }
     except: return None
 
@@ -129,12 +151,22 @@ if tickers:
                             s_color = "green" if data['streak'] > 0 else "red"
                             c1.markdown(f"**Streak:** :{s_color}[{data['streak']:+d}] | **Price:** `${data['price']:.2f}`")
                             c1.markdown(f"**vs. 4EMA:** :{data['pe_color']}[{data['pe_diff']:+.2f} ({data['pe_pct']:+.2f}%)]")
-                            c1.markdown(f"**BB Status:** :{data['bb_outside_col']}[{data['bb_outside_msg']}]")
                             
                             lc_color = "green" if "Above 20" in data['last_cross_type'] else "red"
                             c2.markdown(f"**Stoch:** `{data['stoch_val']:.1f}` | :{data['stoch_dir_col']}[{data['stoch_dir']}]")
-                            c2.markdown(f"**Volatility:** :{data['vol_color']}[{data['vol_status']}] (`{data['bw_pct']:.1f}%`) ")
                             c2.markdown(f"**Last Cross:** :{lc_color}[{data['last_cross_date']}]")
+
+                            # --- NEW BOLLINGER ANALYSIS AREA ---
+                            st.markdown("### 🫧 Bollinger Analysis")
+                            b1, b2, b3 = st.columns(3)
+                            b1.markdown(f"**Vol:** :{data['vol_color']}[{data['vol_status']}]")
+                            b1.markdown(f"**Width:** `{data['bw_pct']:.1f}%`")
+                            
+                            b2.markdown(f"**Upper:** :{data['u_col']}[{data['u_alert']}]")
+                            b2.markdown(f"**Streak:** `{data['u_streak']} bars`")
+                            
+                            b3.markdown(f"**Lower:** :{data['l_col']}[{data['l_alert']}]")
+                            b3.markdown(f"**Streak:** `{data['l_streak']} bars`")
                             
                             st.divider()
                             h1, h2, h3 = st.columns([2.2, 1.3, 2.5])
