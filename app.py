@@ -17,9 +17,9 @@ def get_analysis(symbol, interval):
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
 
-        # 1. Base Indicators
+        # 1. Base Moving Averages
         df['EMA4'] = df['Close'].ewm(span=4, adjust=False).mean()
-        df['EMA20'] = df['Close'].ewm(span=20, adjust=False).mean() # NEW: 20 EMA
+        df['EMA20'] = df['Close'].ewm(span=20, adjust=False).mean()
         df['SMA50'] = df['Close'].rolling(window=50).mean()
         df['SMA100'] = df['Close'].rolling(window=100).mean()
         df['SMA200'] = df['Close'].rolling(window=200).mean()
@@ -30,20 +30,45 @@ def get_analysis(symbol, interval):
         std20 = df['Close'].rolling(window=20).std()
         df['BB_Bot'] = sma20 - (std20 * 2)
 
+        # 2. Slow Stochastic (5, 1)
+        # Fast %K = (Current Close - Lowest Low) / (Highest High - Lowest Low) * 100
+        low_5 = df['Low'].rolling(window=5).min()
+        high_5 = df['High'].rolling(window=5).max()
+        df['%K'] = (df['Close'] - low_5) / (high_5 - low_5) * 100
+        
+        # Slow Stochastic %D is usually a 3-period SMA of %K, 
+        # but since you asked for 5,1 we use the %K value directly as the "Slow" signal
+        stoch_val = df['%K'].iloc[-1]
+        prev_stoch = df['%K'].iloc[-2]
+
+        stoch_msg = "Neutral"
+        stoch_color = "white"
+
+        # Check for Crosses
+        if prev_stoch > 80 and stoch_val <= 80:
+            stoch_msg = "Crossed Below 80 (Bearish)"
+            stoch_color = "red"
+        elif prev_stoch < 20 and stoch_val >= 20:
+            stoch_msg = "Crossed Above 20 (Bullish)"
+            stoch_color = "green"
+        else:
+            # Show current zone if no cross just happened
+            if stoch_val > 80: stoch_msg = "Overbought (>80)"
+            elif stoch_val < 20: stoch_msg = "Oversold (<20)"
+
         last = df.iloc[-1]
         curr_price = last['Close']
         ema4 = last['EMA4']
 
-        # 2. Price vs 4 EMA Calculation
+        # 3. Price vs 4 EMA Calculation
         price_ema_diff = curr_price - ema4
         price_ema_pct = (price_ema_diff / ema4) * 100
         pe_color = "green" if price_ema_diff >= 0 else "red"
 
-        # 3. Convergence Logic (BB Bot vs SMA 50)
+        # 4. Convergence Logic (BB Bot vs SMA 50)
         dist_bb_sma = last['BB_Bot'] - last['SMA50']
         bb_slope = (df['BB_Bot'].iloc[-1] - df['BB_Bot'].iloc[-4]) / 3
         sma_slope = (df['SMA50'].iloc[-1] - df['SMA50'].iloc[-4]) / 3
-        
         closure_rate = sma_slope - bb_slope if dist_bb_sma < 0 else bb_slope - sma_slope
         
         est_periods = "N/A"
@@ -54,7 +79,7 @@ def get_analysis(symbol, interval):
         else:
             est_periods = "Moving Away"
 
-        # 4. Comparison Logic Function
+        # 5. Comparison Logic Function
         def compare(target_val, name):
             if pd.isna(target_val): 
                 return {"name": name, "val": 0, "status": "N/A", "dist_val": 0, "dist_pct": 0, "color": "white"}
@@ -71,7 +96,7 @@ def get_analysis(symbol, interval):
             }
 
         comparisons = [
-            compare(last['EMA20'], "20 EMA"), # Added to list
+            compare(last['EMA20'], "20 EMA"), 
             compare(last['SMA50'], "50 SMA"), 
             compare(last['SMA100'], "100 SMA"), 
             compare(last['SMA200'], "200 SMA"),
@@ -98,7 +123,10 @@ def get_analysis(symbol, interval):
             "cond_bb": "YES" if dist_bb_sma > 0 else "NO",
             "cond_bb_color": "green" if dist_bb_sma > 0 else "red",
             "bb_dist": dist_bb_sma,
-            "est_cross": est_periods
+            "est_cross": est_periods,
+            "stoch_val": stoch_val,
+            "stoch_msg": stoch_msg,
+            "stoch_color": stoch_color
         }
     except: return None
 
@@ -127,8 +155,10 @@ if tickers:
                             c1.markdown(f"**vs. 4EMA:** :{data['pe_color']}[{data['pe_diff']:+.2f} ({data['pe_pct']:+.2f}%)]")
                             
                             c2.markdown(f"**BB Bot > SMA 50?** :{data['cond_bb_color']}[{data['cond_bb']}]")
-                            c2.markdown(f"**Gap to SMA 50:** `{data['bb_dist']:.2f}`")
                             c2.markdown(f"**Est. Cross in:** ` {data['est_cross']} `")
+                            # NEW: Stochastic Value and Cross Message
+                            c2.markdown(f"**Stoch (5,1):** `{data['stoch_val']:.1f}`")
+                            c2.markdown(f"**Signal:** :{data['stoch_color']}[{data['stoch_msg']}]")
                             
                             st.divider()
                             h1, h2, h3 = st.columns([2.2, 1.3, 2.5])
