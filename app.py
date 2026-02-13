@@ -33,7 +33,12 @@ def get_analysis(symbol, interval):
         curr_price = last['Close']
         ema4 = last['EMA4']
 
-        # 2. Convergence Logic (BB Bot vs SMA 50)
+        # 2. Price vs 4 EMA Calculation
+        price_ema_diff = curr_price - ema4
+        price_ema_pct = (price_ema_diff / ema4) * 100
+        pe_color = "green" if price_ema_diff >= 0 else "red"
+
+        # 3. Convergence Logic (BB Bot vs SMA 50)
         dist_bb_sma = last['BB_Bot'] - last['SMA50']
         bb_slope = (df['BB_Bot'].iloc[-1] - df['BB_Bot'].iloc[-4]) / 3
         sma_slope = (df['SMA50'].iloc[-1] - df['SMA50'].iloc[-4]) / 3
@@ -48,19 +53,13 @@ def get_analysis(symbol, interval):
         else:
             est_periods = "Moving Away"
 
-        # 3. Comparison Logic Function
-        # Status = EMA4 vs Target | Distance = Current Price vs Target
+        # 4. Comparison Logic Function
         def compare(target_val, name):
             if pd.isna(target_val): 
                 return {"name": name, "status": "N/A", "dist_val": 0, "dist_pct": 0, "color": "white"}
-            
-            # THE FIX: Calculate distance from current price
             diff_from_price = curr_price - target_val
             pct_from_price = (diff_from_price / target_val) * 100
-            
-            # Trend status remains based on 4 EMA
             ema_above = ema4 > target_val
-            
             return {
                 "name": name, 
                 "status": "YES" if ema_above else "NO", 
@@ -88,6 +87,9 @@ def get_analysis(symbol, interval):
         return {
             "price": curr_price,
             "ema4": ema4,
+            "pe_diff": price_ema_diff,
+            "pe_pct": price_ema_pct,
+            "pe_color": pe_color,
             "streak": streak if is_green[-1] else -streak,
             "comparisons": comparisons,
             "cond_bb": "YES" if dist_bb_sma > 0 else "NO",
@@ -116,9 +118,14 @@ if tickers:
                         if data:
                             c1, c2 = st.columns(2)
                             s_color = "green" if data['streak'] > 0 else "red"
+                            
+                            # Left Column: Price Metrics
                             c1.markdown(f"**Streak:** :{s_color}[{data['streak']:+d}]")
                             c1.markdown(f"**Price:** `${data['price']:.2f}` (4EMA: `${data['ema4']:.2f}`)")
+                            # NEW LINE: Price vs 4EMA Comparison
+                            c1.markdown(f"**vs. 4EMA:** :{data['pe_color']}[{data['pe_diff']:+.2f} ({data['pe_pct']:+.2f}%)]")
                             
+                            # Right Column: BB Metrics
                             c2.markdown(f"**BB Bot > SMA 50?** :{data['cond_bb_color']}[{data['cond_bb']}]")
                             c2.markdown(f"**Gap to SMA 50:** `{data['bb_dist']:.2f}`")
                             c2.markdown(f"**Est. Cross in:** ` {data['est_cross']} `")
