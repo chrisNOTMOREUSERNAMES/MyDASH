@@ -28,6 +28,7 @@ def get_analysis(symbol, interval):
         
         sma20 = df['Close'].rolling(window=20).mean()
         std20 = df['Close'].rolling(window=20).std()
+        df['BB_Top'] = sma20 + (std20 * 2) # Added Upper BB
         df['BB_Bot'] = sma20 - (std20 * 2)
 
         # 2. Slow Stochastic (5, 1) & Historical Cross Logic
@@ -46,17 +47,13 @@ def get_analysis(symbol, interval):
         last_cross_type = "None"
         last_cross_date = "N/A"
         
-        # We iterate backwards through the dataframe
         for i in range(len(df)-2, 1, -1):
             prev_val = df['%K'].iloc[i]
             curr_val = df['%K'].iloc[i+1]
-            
-            # Crossed Below 80 (Sell Signal)
             if prev_val > 80 and curr_val <= 80:
                 last_cross_type = "Below 80"
                 last_cross_date = df.index[i+1].strftime('%Y-%m-%d')
                 break
-            # Crossed Above 20 (Buy Signal)
             if prev_val < 20 and curr_val >= 20:
                 last_cross_type = "Above 20"
                 last_cross_date = df.index[i+1].strftime('%Y-%m-%d')
@@ -74,16 +71,49 @@ def get_analysis(symbol, interval):
         bb_slope = (df['BB_Bot'].iloc[-1] - df['BB_Bot'].iloc[-4]) / 3
         sma_slope = (df['SMA50'].iloc[-1] - df['SMA50'].iloc[-4]) / 3
         closure_rate = sma_slope - bb_slope if dist_bb_sma < 0 else bb_slope - sma_slope
-        est_periods = f"{int(abs(dist_bb_sma) / closure_rate)} {interval.replace('1', '')}s" if closure_rate > 0 else "N/A"
+        
+        if closure_rate > 0:
+            est_periods = f"{int(abs(dist_bb_sma) / closure_rate)} {interval.replace('1', '')}s"
+        else:
+            est_periods = "N/A"
 
         # 4. Comparison Logic
         def compare(target_val, name):
-            if pd.isna(target_val): return {"name": name, "val": 0, "status": "N/A", "dist_val": 0, "dist_pct": 0, "color": "white"}
+            if pd.isna(target_val): 
+                return {"name": name, "val": 0, "status": "N/A", "dist_val": 0, "dist_pct": 0, "color": "white"}
+            
             diff = curr_price - target_val
             pct = (diff / target_val) * 100
-            return {"name": name, "val": target_val, "status": "YES" if ema4 > target_val else "NO", "dist_val": diff, "dist_pct": pct, "color": "green" if ema4 > target_val else "red"}
+            
+            # Special case for 4 EMA: It can't be above itself for the status
+            if name == "4 EMA":
+                status = "-"
+                color = "white"
+            else:
+                status = "YES" if ema4 > target_val else "NO"
+                color = "green" if ema4 > target_val else "red"
+                
+            return {
+                "name": name, 
+                "val": target_val, 
+                "status": status, 
+                "dist_val": diff, 
+                "dist_pct": pct, 
+                "color": color
+            }
 
-        comparisons = [compare(last['EMA20'], "20 EMA"), compare(last['SMA50'], "50 SMA"), compare(last['SMA100'], "100 SMA"), compare(last['SMA200'], "200 SMA"), compare(last['EMA250'], "250 EMA"), compare(last['EMA600'], "600 EMA"), compare(last['BB_Bot'], "Lower BB")]
+        # Added 4 EMA and Upper BB to this list
+        comparisons = [
+            compare(last['EMA4'], "4 EMA"),
+            compare(last['EMA20'], "20 EMA"),
+            compare(last['SMA50'], "50 SMA"), 
+            compare(last['SMA100'], "100 SMA"), 
+            compare(last['SMA200'], "200 SMA"), 
+            compare(last['EMA250'], "250 EMA"), 
+            compare(last['EMA600'], "600 EMA"),
+            compare(last['BB_Top'], "Upper BB"),
+            compare(last['BB_Bot'], "Lower BB")
+        ]
 
         # Streak Logic
         is_green = (df['Close'] > df['Open']).tolist()
